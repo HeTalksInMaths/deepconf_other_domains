@@ -18,6 +18,7 @@ sys.path.append('./deepconf_adapter')
 from confidence_utils import (
     TraceWithLogprobs,
     compute_trace_confidence,
+    compute_multi_trace_confidence,
     should_generate_more_traces
 )
 
@@ -78,24 +79,42 @@ def run_deepconf_simulation(prompt, true_quality, max_traces=10, min_traces=3, c
         trace = simulate_model_response(prompt, quality=true_quality)
         traces.append(trace)
 
-        # Compute confidence
-        conf = compute_trace_confidence(trace)
+        # Compute aggregate confidence so far
+        current_conf = compute_multi_trace_confidence(traces, aggregation='mean')
 
         # Check early stopping
-        should_continue, info = should_generate_more_traces(
-            traces,
+        should_continue = should_generate_more_traces(
+            current_confidence=current_conf,
+            traces_so_far=len(traces),
             min_traces=min_traces,
+            max_traces=max_traces,
             confidence_threshold=conf_threshold
         )
 
-        print(f"  Trace {i+1:2d}: confidence = {conf:.3f}", end='')
+        # Determine reason for stopping/continuing
+        if len(traces) < min_traces:
+            reason = f"need min {min_traces}"
+        elif not should_continue and len(traces) >= max_traces:
+            reason = "max traces reached"
+        elif not should_continue:
+            reason = "threshold reached"
+        else:
+            reason = "continue"
+
+        print(f"  Trace {i+1:2d}: conf = {current_conf:.3f}", end='')
 
         if not should_continue:
-            print(f" → ✅ STOP (threshold reached)")
+            print(f" → ✅ STOP ({reason})")
             break
         else:
-            reason = info.get('reason', 'continue')
             print(f" → {reason}")
+
+    # Create info dict to return
+    info = {
+        'current_confidence': current_conf,
+        'reason': reason,
+        'traces_used': len(traces)
+    }
 
     return traces, info
 
