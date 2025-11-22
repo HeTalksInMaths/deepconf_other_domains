@@ -19,44 +19,102 @@ class TraceWithLogprobs:
     metadata: Dict[str, Any] = None
 
 
-def compute_token_confidence(logprobs: List[float], method: str = 'neg_avg_logprob', top_k: int = 5) -> float:
+def compute_token_confidence(
+    logprobs: List[float],
+    method: str = 'neg_avg_logprob',
+    top_k: int = 5,
+    window_size: int = 100,
+    bottom_percent: float = 0.1
+) -> float:
     """
     Compute confidence score from token log probabilities.
-    
+
     Original DeepConf uses: negative average log probability of top-k tokens
-    
+
     Args:
         logprobs: Log probabilities for each token
         method: Confidence computation method
-            - 'neg_avg_logprob': Negative average log prob (DeepConf original)
+            - 'neg_avg_logprob': Negative average log prob (simple mean)
+            - 'bottom_window': Bottom 10% of sliding windows (DeepConf preferred, +2-5% accuracy)
+            - 'tail_confidence': Mean of last N tokens
+            - 'min_window': Minimum sliding window (most conservative)
             - 'entropy': Token-level entropy
             - 'min_prob': Minimum probability (most uncertain token)
         top_k: Number of top tokens to consider (for methods that use it)
-    
+        window_size: Window size for sliding window methods (default: 100)
+        bottom_percent: Percentage of bottom windows to average (default: 0.1 = 10%)
+
     Returns:
         Confidence score (higher = more confident)
     """
     if not logprobs:
         return 0.0
-    
+
+    # Filter out any inf/nan values before computation
+    valid_logprobs = [lp for lp in logprobs if np.isfinite(lp)]
+    if not valid_logprobs:
+        # All logprobs were inf/nan - return 0 confidence
+        return 0.0
+
     if method == 'neg_avg_logprob':
-        # Original DeepConf: negative average log probability
-        # More negative logprobs = less confident
-        return -np.mean(logprobs)
-    
+        # Simple mean (baseline)
+        clipped_logprobs = np.clip(valid_logprobs, -100, 0)
+        return float(-np.mean(clipped_logprobs))
+
+    elif method == 'bottom_window':
+        # DeepConf preferred method: Focus on weakest reasoning segments
+        # Research shows +2-5% accuracy improvement over mean
+        clipped_logprobs = np.clip(valid_logprobs, -100, 0)
+
+        if len(clipped_logprobs) < window_size:
+            # Too short for windowing, fall back to mean
+            return float(-np.mean(clipped_logprobs))
+
+        # Compute sliding window confidences
+        window_confs = []
+        for i in range(len(clipped_logprobs) - window_size + 1):
+            window = clipped_logprobs[i:i+window_size]
+            window_confs.append(-np.mean(window))  # Confidence of this window
+
+        # Take bottom X% of windows (weakest reasoning)
+        num_bottom = max(1, int(len(window_confs) * bottom_percent))
+        bottom_windows = np.partition(window_confs, num_bottom-1)[:num_bottom]
+        return float(np.mean(bottom_windows))
+
+    elif method == 'tail_confidence':
+        # DeepConf alternative: Last N tokens (final answer quality)
+        clipped_logprobs = np.clip(valid_logprobs, -100, 0)
+        tail_logprobs = clipped_logprobs[-min(window_size, len(clipped_logprobs)):]
+        return float(-np.mean(tail_logprobs))
+
+    elif method == 'min_window':
+        # Most conservative: Minimum sliding window confidence
+        clipped_logprobs = np.clip(valid_logprobs, -100, 0)
+
+        if len(clipped_logprobs) < window_size:
+            return float(-np.mean(clipped_logprobs))
+
+        # Compute sliding windows
+        window_confs = []
+        for i in range(len(clipped_logprobs) - window_size + 1):
+            window = clipped_logprobs[i:i+window_size]
+            window_confs.append(-np.mean(window))
+
+        return float(min(window_confs))  # Most pessimistic window
+
     elif method == 'entropy':
         # Convert logprobs to probabilities and compute entropy
-        probs = np.exp(logprobs)
+        probs = np.exp(valid_logprobs)
         probs = probs / np.sum(probs)  # Normalize
         entropy = -np.sum(probs * np.log(probs + 1e-10))
         # Normalize to 0-1 range (lower entropy = higher confidence)
         return 1.0 - (entropy / np.log(len(probs)))
-    
+
     elif method == 'min_prob':
         # Use the minimum probability as uncertainty indicator
-        min_logprob = np.min(logprobs)
+        min_logprob = np.min(valid_logprobs)
         return -min_logprob  # Convert to confidence score
-    
+
     else:
         raise ValueError(f"Unknown confidence method: {method}")
 

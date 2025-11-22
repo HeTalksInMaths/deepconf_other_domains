@@ -81,37 +81,119 @@ class HarmBenchLoader:
         return instances
 
 
-class WildGuardTestLoader:
-    """Load WildGuardTest benchmark."""
-    
+class WildGuardMixLoader:
+    """
+    Load WildGuardMix benchmark with explicit refusal labels.
+
+    WildGuardMix is a comprehensive safety benchmark from AllenAI with:
+    - 1,725 test examples
+    - Explicit refusal labels (response_refusal_label: refusal/compliance)
+    - Multi-dimensional harm annotations
+    - Used in "Chasing Moving Targets" and other safety research
+
+    Perfect for research on confidence × refusal interactions.
+    """
+
     @staticmethod
-    def load(data_path: str, subset: str = 'prompt') -> List[SafetyInstance]:
+    def load(data_path: str, split: str = 'test') -> List[SafetyInstance]:
         """
-        Load WildGuardTest dataset.
-        
+        Load WildGuardMix dataset.
+
         Expected format (JSONL):
-        {"prompt": "...", "response": "...", "prompt_harmfulness": "...", ...}
-        
-        Download from: https://huggingface.co/datasets/allenai/wildguardtest
-        
+        {
+            "prompt": "...",
+            "response": "...",
+            "prompt_harm_label": "harmful" | "unharmful",
+            "response_harm_label": "harmful" | "unharmful",
+            "response_refusal_label": "refusal" | "compliance",  # ← KEY FIELD!
+            "subcategory": "...",
+            ...
+        }
+
+        Download from: https://huggingface.co/datasets/allenai/wildguardmix
+        Note: Requires HuggingFace authentication (gated dataset)
+
+        Experimental Setup (per safety research best practices):
+        - Use 'test' split only for evaluation (1,725 examples)
+        - Ground truth: prompt_harm_label determines if prompt is unsafe
+        - Refusal detection: Use explicit response_refusal_label (no pattern matching needed!)
+        - Category stratification: Use subcategory for detailed analysis
+
         Args:
-            subset: 'prompt' or 'response' evaluation
+            data_path: Path to downloaded WildGuardMix data
+            split: Dataset split to load (default: 'test')
         """
         instances = []
-        data_file = Path(data_path) / "test.jsonl"
-        
+        data_file = Path(data_path) / f"{split}.jsonl"
+
+        if not data_file.exists():
+            raise FileNotFoundError(
+                f"WildGuardMix {split} split not found at {data_file}\n"
+                f"Download from: https://huggingface.co/datasets/allenai/wildguardmix\n"
+                f"Note: Requires HuggingFace authentication"
+            )
+
         with open(data_file, 'r') as f:
             for i, line in enumerate(f):
                 data = json.loads(line)
-                
+
+                # Ground truth: Is the PROMPT harmful?
+                # (We'll test if our model appropriately refuses harmful prompts)
+                prompt_is_harmful = data.get('prompt_harm_label', 'unharmful') == 'harmful'
+
+                # Store explicit refusal label in metadata for analysis
+                # This is the gold standard - no pattern matching needed!
+                response_refused = data.get('response_refusal_label', 'compliance') == 'refusal'
+
+                instances.append(SafetyInstance(
+                    id=f"wildguardmix_{split}_{i}",
+                    prompt=data['prompt'],
+                    ground_truth_label='unsafe' if prompt_is_harmful else 'safe',
+                    category=data.get('subcategory', 'unknown'),
+                    metadata={
+                        **data,
+                        # Store gold standard refusal label for validation
+                        'gold_refusal': response_refused,
+                        'gold_response': data.get('response', ''),
+                        'response_harm_label': data.get('response_harm_label', 'unharmful')
+                    }
+                ))
+
+        return instances
+
+
+class WildGuardTestLoader:
+    """
+    DEPRECATED: Use WildGuardMixLoader instead.
+
+    WildGuardMix has better annotations including explicit refusal labels.
+    """
+
+    @staticmethod
+    def load(data_path: str, subset: str = 'prompt') -> List[SafetyInstance]:
+        """
+        Load WildGuardTest dataset (deprecated).
+
+        For new projects, use WildGuardMixLoader instead which has:
+        - Explicit refusal labels (response_refusal_label)
+        - Better quality annotations
+        - Larger test set (1,725 vs smaller)
+        """
+        print("⚠️  WARNING: WildGuardTestLoader is deprecated. Use WildGuardMixLoader instead.")
+        instances = []
+        data_file = Path(data_path) / "test.jsonl"
+
+        with open(data_file, 'r') as f:
+            for i, line in enumerate(f):
+                data = json.loads(line)
+
                 if subset == 'prompt':
                     text = data['prompt']
-                    # WildGuard uses 'unharmful' and 'harmful'
                     label = 'unsafe' if data.get('prompt_harmfulness') == 'harmful' else 'safe'
                 else:  # response
                     text = data['response']
                     label = 'unsafe' if data.get('response_harmfulness') == 'harmful' else 'safe'
-                
+
                 instances.append(SafetyInstance(
                     id=f"wildguard_{subset}_{i}",
                     prompt=text,
@@ -119,13 +201,13 @@ class WildGuardTestLoader:
                     category=data.get('harm_category', 'unknown'),
                     metadata=data
                 ))
-        
+
         return instances
 
 
 class SafetyBenchLoader:
     """Generic loader that auto-detects format."""
-    
+
     @staticmethod
     def load(
         benchmark_name: str,
@@ -135,9 +217,9 @@ class SafetyBenchLoader:
     ) -> List[SafetyInstance]:
         """
         Load benchmark by name.
-        
+
         Args:
-            benchmark_name: One of ['toxicchat', 'harmbench', 'wildguard']
+            benchmark_name: One of ['toxicchat', 'harmbench', 'wildguardmix', 'wildguard']
             data_path: Path to benchmark data
             split: Dataset split to load
             **kwargs: Additional loader-specific arguments
@@ -145,13 +227,14 @@ class SafetyBenchLoader:
         loaders = {
             'toxicchat': ToxicChatLoader,
             'harmbench': HarmBenchLoader,
-            'wildguard': WildGuardTestLoader,
+            'wildguardmix': WildGuardMixLoader,  # RECOMMENDED: Has explicit refusal labels!
+            'wildguard': WildGuardTestLoader,     # Deprecated: Use wildguardmix instead
         }
-        
+
         if benchmark_name.lower() not in loaders:
             raise ValueError(f"Unknown benchmark: {benchmark_name}. "
                            f"Supported: {list(loaders.keys())}")
-        
+
         loader = loaders[benchmark_name.lower()]
         return loader.load(data_path, split=split, **kwargs)
 

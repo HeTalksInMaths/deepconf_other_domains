@@ -25,11 +25,12 @@ def run_safety_deepconf_experiment(
     min_traces: int = 3,
     max_traces: int = 10,
     early_stopping: bool = True,
+    use_batch: bool = True,
     output_dir: str = "results/safety_experiment"
 ):
     """
     Run complete safety DeepConf experiment.
-    
+
     Args:
         model_name: Qwen3 model to use
         benchmark_name: 'synthetic', 'toxicchat', 'harmbench', 'wildguard'
@@ -37,6 +38,7 @@ def run_safety_deepconf_experiment(
         min_traces: Minimum reasoning traces
         max_traces: Maximum reasoning traces
         early_stopping: Use confidence-based early stopping
+        use_batch: Use parallel batch generation (MUCH FASTER!)
         output_dir: Where to save results
     """
     
@@ -55,10 +57,25 @@ def run_safety_deepconf_experiment(
     if benchmark_name == "synthetic":
         instances = SyntheticSafetyBenchmark.create(num_instances=num_instances)
         print(f"✓ Created {len(instances)} synthetic instances")
+    elif benchmark_name == "toxicchat":
+        from benchmark_loaders import ToxicChatLoader
+        instances = ToxicChatLoader.load("data/toxicchat", split="test")
+        print(f"✓ Loaded {len(instances)} ToxicChat instances")
+    elif benchmark_name == "harmbench":
+        from benchmark_loaders import HarmBenchLoader
+        instances = HarmBenchLoader.load("data/harmbench", split="test")
+        print(f"✓ Loaded {len(instances)} HarmBench instances")
+    elif benchmark_name == "wildguardmix":
+        from benchmark_loaders import WildGuardMixLoader
+        instances = WildGuardMixLoader.load("data/wildguardmix", split="test")
+        print(f"✓ Loaded {len(instances)} WildGuardMix instances")
+        print(f"  ✅ Using explicit 'response_refusal_label' (gold standard!)")
+    elif benchmark_name == "wildguard":
+        from benchmark_loaders import WildGuardTestLoader
+        instances = WildGuardTestLoader.load("data/wildguard")
+        print(f"✓ Loaded {len(instances)} WildGuard instances")
     else:
-        # For real benchmarks, you'd specify the path
-        # instances = SafetyBenchLoader.load(benchmark_name, "path/to/data")
-        raise NotImplementedError(f"Real benchmark loading: Download {benchmark_name} and specify path")
+        raise ValueError(f"Unknown benchmark: {benchmark_name}")
     
     print(f"  Total instances: {len(instances)}")
     print(f"  Unsafe: {sum(1 for i in instances if i.ground_truth_label == 'unsafe')}")
@@ -69,22 +86,27 @@ def run_safety_deepconf_experiment(
     experiment = SafetyDeepConfExperiment(
         min_traces=min_traces,
         max_traces=max_traces,
-        confidence_threshold=0.7
+        confidence_percentile=90,  # DeepConf default: 90th percentile
+        use_percentile_threshold=True  # Use adaptive thresholding (DeepConf style)
     )
     print(f"✓ Experiment initialized")
     print(f"  Min traces: {min_traces}")
     print(f"  Max traces: {max_traces}")
+    print(f"  Confidence percentile: 90th (adaptive threshold)")
     print(f"  Early stopping: {early_stopping}")
-    
+    print(f"  Batch generation: {use_batch} {'(PARALLEL - FASTER!)' if use_batch else '(SEQUENTIAL - SLOWER)'}")
+
     # Step 4: Run experiment
     print(f"\n[4/5] Running experiment on {len(instances)} instances...")
     print("  (This may take a few minutes)")
-    
+
     predictions = experiment.run_experiment(
         instances,
         model_callable=model,  # Qwen3Adapter is callable
         early_stopping=early_stopping,
-        temperature=0.7,
+        use_batch=use_batch,
+        temperature=0.6,  # DeepConf default
+        top_p=0.95,        # DeepConf default
         max_new_tokens=256
     )
     
@@ -157,9 +179,10 @@ def compare_baseline_vs_deepconf(
         min_traces=1,
         max_traces=1,
         early_stopping=False,
+        use_batch=False,  # No benefit with 1 trace
         output_dir="results/baseline_n1"
     )
-    
+
     # Run fixed multi-trace (n=5)
     print("\n\n[FIXED] Fixed 5 traces")
     _, fixed_analysis = run_safety_deepconf_experiment(
@@ -168,9 +191,10 @@ def compare_baseline_vs_deepconf(
         min_traces=5,
         max_traces=5,
         early_stopping=False,
+        use_batch=True,  # Parallel generation of all 5 traces
         output_dir="results/fixed_n5"
     )
-    
+
     # Run adaptive DeepConf
     print("\n\n[DEEPCONF] Adaptive (3-10 traces, early stopping)")
     _, deepconf_analysis = run_safety_deepconf_experiment(
@@ -179,6 +203,7 @@ def compare_baseline_vs_deepconf(
         min_traces=3,
         max_traces=10,
         early_stopping=True,
+        use_batch=True,  # Parallel batch generation
         output_dir="results/deepconf_adaptive"
     )
     
@@ -228,13 +253,15 @@ if __name__ == "__main__":
                        help="Maximum traces to generate")
     parser.add_argument("--no-early-stopping", action="store_true",
                        help="Disable confidence-based early stopping")
+    parser.add_argument("--no-batch", action="store_true",
+                       help="Disable batch generation (sequential mode - slower)")
     parser.add_argument("--compare", action="store_true",
                        help="Run baseline vs DeepConf comparison")
     parser.add_argument("--output", default="results/safety_experiment",
                        help="Output directory for results")
-    
+
     args = parser.parse_args()
-    
+
     if args.compare:
         # Run comparison experiment
         compare_baseline_vs_deepconf(
@@ -250,5 +277,6 @@ if __name__ == "__main__":
             min_traces=args.min_traces,
             max_traces=args.max_traces,
             early_stopping=not args.no_early_stopping,
+            use_batch=not args.no_batch,
             output_dir=args.output
         )

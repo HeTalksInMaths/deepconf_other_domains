@@ -41,7 +41,7 @@ class Qwen3SafetyAdapter:
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=torch_dtype,
+            dtype=torch_dtype,
             device_map=device
         )
         self.model.eval()
@@ -53,8 +53,8 @@ class Qwen3SafetyAdapter:
         self,
         prompt: str,
         max_new_tokens: int = 512,
-        temperature: float = 0.7,
-        top_p: float = 0.9,
+        temperature: float = 0.6,  # DeepConf default
+        top_p: float = 0.95,        # DeepConf default
         top_k: int = 50,
         do_sample: bool = True,
         enable_thinking: bool = False
@@ -110,13 +110,22 @@ class Qwen3SafetyAdapter:
         # Extract log probabilities
         # outputs.scores is a tuple of tensors, one per generated token
         logprobs = []
-        for score in outputs.scores:
-            # Get log softmax over vocabulary
-            log_probs = torch.nn.functional.log_softmax(score[0], dim=-1)
-            # Get the log prob of the selected token
-            selected_token_id = generated_ids[len(logprobs)]
-            logprobs.append(log_probs[selected_token_id].item())
-        
+        if outputs.scores and len(outputs.scores) > 0:
+            for i, score in enumerate(outputs.scores):
+                if i < len(generated_ids):
+                    # Get log softmax over vocabulary
+                    log_probs = torch.nn.functional.log_softmax(score[0], dim=-1)
+                    # Get the log prob of the selected token
+                    selected_token_id = generated_ids[i]
+                    logprob_value = log_probs[selected_token_id].item()
+
+                    # Safeguard: clip extreme values
+                    if np.isfinite(logprob_value):
+                        logprobs.append(max(logprob_value, -100.0))  # Clip at -100
+                    else:
+                        # If we get inf/nan, use a very negative value
+                        logprobs.append(-100.0)
+
         # Extract tokens
         tokens = self.tokenizer.convert_ids_to_tokens(generated_ids)
         
@@ -136,15 +145,88 @@ class Qwen3SafetyAdapter:
         **generation_kwargs
     ) -> List[Tuple[str, List[float], List[str]]]:
         """
-        Generate for multiple prompts (sequential for now).
-        
-        Note: True batch generation with logprobs is complex.
-        For simplicity, we process sequentially.
+        Generate for multiple prompts in parallel using batch processing.
+
+        This is much faster than sequential generation, especially with GPU.
+        Batch size is automatically determined by number of prompts.
         """
+        if len(prompts) == 0:
+            return []
+
+        if len(prompts) == 1:
+            # Single prompt - use standard generation
+            return [self.generate_with_logprobs(prompts[0], **generation_kwargs)]
+
+        # Format all prompts with chat template
+        messages_list = [[{"role": "user", "content": p}] for p in prompts]
+        texts = [
+            self.tokenizer.apply_chat_template(
+                msgs,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=generation_kwargs.get('enable_thinking', False)
+            )
+            for msgs in messages_list
+        ]
+
+        # Tokenize batch with padding
+        inputs = self.tokenizer(
+            texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True
+        ).to(self.model.device)
+
+        input_lengths = (inputs.attention_mask.sum(dim=1)).tolist()
+
+        # Generate for all prompts in parallel
+        max_new_tokens = generation_kwargs.get('max_new_tokens', 512)
+        temperature = generation_kwargs.get('temperature', 0.6)  # DeepConf default
+        top_p = generation_kwargs.get('top_p', 0.95)             # DeepConf default
+        top_k = generation_kwargs.get('top_k', 50)
+        do_sample = generation_kwargs.get('do_sample', True)
+
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                do_sample=do_sample,
+                return_dict_in_generate=True,
+                output_scores=True,
+                pad_token_id=self.tokenizer.eos_token_id
+            )
+
+        # Extract results for each prompt
         results = []
-        for prompt in prompts:
-            result = self.generate_with_logprobs(prompt, **generation_kwargs)
-            results.append(result)
+        for i, (seq, input_len) in enumerate(zip(outputs.sequences, input_lengths)):
+            # Extract generated tokens (after input)
+            generated_ids = seq[input_len:]
+            generated_text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+            # Extract log probabilities for this sequence
+            logprobs = []
+            if outputs.scores and len(outputs.scores) > 0:
+                for t, score in enumerate(outputs.scores):
+                    if t < len(generated_ids):
+                        log_probs = torch.nn.functional.log_softmax(score[i], dim=-1)
+                        selected_token_id = generated_ids[t]
+                        logprob_value = log_probs[selected_token_id].item()
+
+                        # Safeguard: clip extreme values
+                        if np.isfinite(logprob_value):
+                            logprobs.append(max(logprob_value, -100.0))  # Clip at -100
+                        else:
+                            # If we get inf/nan, use a very negative value
+                            logprobs.append(-100.0)
+
+            # Extract tokens
+            tokens = self.tokenizer.convert_ids_to_tokens(generated_ids)
+
+            results.append((generated_text, logprobs, tokens))
+
         return results
     
     def estimate_memory_usage(self) -> dict:

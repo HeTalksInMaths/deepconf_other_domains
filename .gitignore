@@ -35,6 +35,13 @@ ENV/
 # Experiment results
 results/
 *.log
+data/
+*.bak
+*.bak2
+*.bak3
+
+# Environment variables
+.env
 
 # OS
 .DS_Store
