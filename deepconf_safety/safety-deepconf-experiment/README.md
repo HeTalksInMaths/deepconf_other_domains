@@ -119,6 +119,26 @@ The framework categorizes each prediction:
 
 ### Key Metrics
 
+## Post-hoc Threshold Sweep
+
+Once a run finishes (and `results/<experiment>/predictions.jsonl` exists), you can replay it with looser/tighter percentile cutoffs to see how many traces you *could* have saved without rerunning the model:
+
+```bash
+cd safety-deepconf-experiment
+python analyze_threshold_sensitivity.py \
+    --results-dir results/toxicchat_qwen06b_1000_vllm \
+    --benchmark toxicchat \
+    --data-root data \
+    --percentiles 60 70 80 90 \
+    --min-traces 3 \
+    --max-traces 10
+```
+
+The script:
+- Loads saved traces/confidences, recomputes adaptive thresholds per instance, and simulates early stopping for each percentile.
+- Reports new accuracy, average traces, and estimated token savings per percentile **without** regenerating model outputs.
+- Keeps the original refusal heuristics/unsafe keyword check so metrics match the main pipeline.
+
 ```json
 {
   "overall": {

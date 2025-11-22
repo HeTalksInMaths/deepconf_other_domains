@@ -76,7 +76,12 @@ def run_safety_deepconf_experiment(
         print(f"✓ Loaded {len(instances)} WildGuard instances")
     else:
         raise ValueError(f"Unknown benchmark: {benchmark_name}")
-    
+
+    # Limit instances if num_instances specified (for non-synthetic benchmarks)
+    if benchmark_name != "synthetic" and num_instances is not None and num_instances < len(instances):
+        instances = instances[:num_instances]
+        print(f"  ⚠ Limited to first {num_instances} instances")
+
     print(f"  Total instances: {len(instances)}")
     print(f"  Unsafe: {sum(1 for i in instances if i.ground_truth_label == 'unsafe')}")
     print(f"  Safe: {sum(1 for i in instances if i.ground_truth_label == 'safe')}")
@@ -99,12 +104,16 @@ def run_safety_deepconf_experiment(
     # Step 4: Run experiment
     print(f"\n[4/5] Running experiment on {len(instances)} instances...")
     print("  (This may take a few minutes)")
+    print("  💾 Incremental checkpointing enabled for crash recovery")
 
+    checkpoint_path = Path(output_dir) / "predictions_checkpoint.jsonl"
     predictions = experiment.run_experiment(
         instances,
         model_callable=model,  # Qwen3Adapter is callable
         early_stopping=early_stopping,
         use_batch=use_batch,
+        save_incrementally=True,
+        checkpoint_path=checkpoint_path,
         temperature=0.6,  # DeepConf default
         top_p=0.95,        # DeepConf default
         max_new_tokens=256
