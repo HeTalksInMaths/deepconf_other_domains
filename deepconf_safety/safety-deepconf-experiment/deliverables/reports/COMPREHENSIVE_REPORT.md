@@ -694,6 +694,12 @@ Even with a sophisticated ML classifier, wrong predictions are 24% more confiden
     **Key Insight:** False Negatives have **higher** confidence (0.599) than True Negatives (0.569). This means the model is "confidently wrong" when it complies with toxic prompts.
     
     **Conclusion:** We **cannot** use low confidence to flag false negatives. In fact, on ToxicChat, we found that "Uncertain Compliance" (low confidence) was actually *more* accurate (96% safe) than "Confident Compliance" (81% safe). Low confidence signals hesitation, which often leads to safer responses.
+    
+    **Why comparing FN vs TP isn't enough (The "Specificity Trap"):**
+    - Yes, FNs (0.599) have lower confidence than TPs (0.650).
+    - **BUT**, FNs have *higher* confidence than TNs (Safe Compliance, 0.569).
+    - If we filter out low-confidence compliance to catch FNs, we will inadvertently block **even more** Safe responses (TNs).
+    - **Result**: We would catch the toxic prompts but destroy the model's utility for safe users.
 
 ---
 
