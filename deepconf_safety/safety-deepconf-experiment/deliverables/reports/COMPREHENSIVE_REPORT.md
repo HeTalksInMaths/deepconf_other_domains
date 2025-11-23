@@ -680,6 +680,20 @@ Even with a sophisticated ML classifier, wrong predictions are 24% more confiden
 - Models are more deterministic on toxic content (consistent refusals)
 - Safe prompts lead to more varied, creative responses (lower confidence)
 - **Cannot use low confidence as a safety signal** - it may just mean creative responses
+    
+    ### Finding 6: Low Confidence is NOT a Proxy for False Negatives (Hypothesis Rejected)
+    
+    **We analyzed the confidence of False Negatives (Toxic prompts that were NOT refused) on WildGuardMix:**
+    
+    | Category | Mean Confidence | Interpretation |
+    |----------|----------------|----------------|
+    | **False Negatives** (Toxic → Complied) | **0.5990** | **Moderate Confidence** |
+    | True Negatives (Safe → Complied) | 0.5689 | Moderate Confidence |
+    | True Positives (Toxic → Refused) | 0.6497 | High Confidence |
+    
+    **Key Insight:** False Negatives have **higher** confidence (0.599) than True Negatives (0.569). This means the model is "confidently wrong" when it complies with toxic prompts.
+    
+    **Conclusion:** We **cannot** use low confidence to flag false negatives. In fact, on ToxicChat, we found that "Uncertain Compliance" (low confidence) was actually *more* accurate (96% safe) than "Confident Compliance" (81% safe). Low confidence signals hesitation, which often leads to safer responses.
 
 ---
 
@@ -720,6 +734,8 @@ Stage 3: Human review
   - Early stopping (as designed)
   - Identifying deterministic behavior
   - Detecting toxic prompts (they trigger high confidence)
+  - Detecting toxic prompts (they trigger high confidence)
+      - **Note**: Do NOT use low confidence to flag false negatives (see Finding 6).
 
 **4. Validate Heuristics on Adversarial Data**
 - ToxicChat shows 75% accuracy with heuristics
