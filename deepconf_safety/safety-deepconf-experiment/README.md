@@ -139,6 +139,30 @@ The script:
 - Reports new accuracy, average traces, and estimated token savings per percentile **without** regenerating model outputs.
 - Keeps the original refusal heuristics/unsafe keyword check so metrics match the main pipeline.
 
+## WildGuardMix Automation (Lambda GPU)
+
+Use `scripts/run_wildguardmix_gpu.sh` to kick off the full Qwen3-0.6B baseline on the gold-labeled WildGuardMix dataset from a Lambda GPU box:
+
+```bash
+cd ~/deepconf_safety/safety-deepconf-experiment
+scripts/run_wildguardmix_gpu.sh
+```
+
+The script will:
+- Activate `~/venv_deepconf` (or prompt you to do so) and load `.env` for HuggingFace tokens.
+- Download WildGuardMix (if not already in `data/wildguardmix/`).
+- Launch `python3 run_experiment.py --model Qwen/Qwen3-0.6B --benchmark wildguardmix ...` with logs in `logs/wildguardmix_qwen06b.log` and PID saved to `lambda_artifacts/wildguardmix_run.pid`.
+- Drop a `lambda_artifacts/wildguardmix_watch.sh` helper that implements the suggested monitor pattern:
+
+```bash
+while [ ! -f results/wildguardmix_qwen06b_baseline/analysis.json ]; do
+  sleep 60
+done
+# bash scripts/run_wildguardmix_wildguard.sh  # (uncomment when ready)
+```
+
+Run the watcher in another shell to trigger downstream automations (e.g., WildGuard classification) the moment `analysis.json` lands.
+
 ```json
 {
   "overall": {

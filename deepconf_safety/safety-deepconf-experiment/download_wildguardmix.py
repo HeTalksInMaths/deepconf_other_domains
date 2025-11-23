@@ -1,60 +1,69 @@
 """
-Download WildGuardMix with authentication token
+Download WildGuardMix with authentication token.
+Supports both wildguardtest (1,725 eval rows) and wildguardtrain configs.
 """
+
 import os
 from pathlib import Path
 from datasets import load_dataset
 
-# Set token from environment variable or .env file
-token = os.getenv("HF_TOKEN", "YOUR_HF_TOKEN_HERE")
+token = os.getenv("HF_TOKEN")
+if not token:
+    raise SystemExit("HF_TOKEN not found in environment. Set it (e.g., source .env) before running.")
 
 print("=" * 60)
 print("DOWNLOADING WILDGUARDMIX (AUTHENTICATED)")
 print("=" * 60)
 
-output_path = Path("data")
+output_path = Path("data") / "wildguardmix"
 output_path.mkdir(parents=True, exist_ok=True)
 
-try:
-    print("\nDownloading WildGuardMix from allenai/wildguardmix...")
-    print("(This is a gated dataset - using provided authentication token)")
+configs = [
+    ("wildguardtest", "test"),
+    ("wildguardtrain", "train"),
+]
 
-    # Load with token
-    wildguardmix = load_dataset("allenai/wildguardmix", token=token)
+total_examples = 0
+downloaded = []
 
-    wildguard_dir = output_path / "wildguardmix"
-    wildguard_dir.mkdir(exist_ok=True)
+for config_name, expected_split in configs:
+    try:
+        print(f"\nDownloading config '{config_name}' (expects '{expected_split}' split)...")
+        ds = load_dataset("allenai/wildguardmix", config_name, token=token)
+    except Exception as e:  # pylint: disable=broad-except
+        print(f"  ❌ Failed to download config '{config_name}': {e}")
+        continue
 
-    # Save to disk
-    for split in wildguardmix.keys():
-        print(f"\nSaving {split} split...")
-        wildguardmix[split].to_json(wildguard_dir / f"{split}.jsonl")
+    for split_name, dataset in ds.items():
+        out_file = output_path / f"{split_name}.jsonl"
+        print(f"  Saving split '{split_name}' → {out_file}")
+        dataset.to_json(out_file)
+        split_size = len(dataset)
+        total_examples += split_size
+        downloaded.append((config_name, split_name, split_size))
 
-    print(f"\n✓ WildGuardMix saved to {wildguard_dir}")
-    print(f"  Splits: {list(wildguardmix.keys())}")
-    print(f"  Total examples: {sum(len(wildguardmix[s]) for s in wildguardmix.keys())}")
+print("\n" + "=" * 60)
+if downloaded:
+    print("DOWNLOAD COMPLETE!")
+    for cfg, split, size in downloaded:
+        print(f"  - {cfg}/{split}: {size} examples")
+    print(f"\nTotal examples saved: {total_examples}")
+    sample_file = output_path / "test.jsonl"
+    if sample_file.exists():
+        from itertools import islice
+        import json
 
-    if 'test' in wildguardmix:
-        print(f"\n✅ Test set: {len(wildguardmix['test'])} examples")
-        print("  Fields include explicit 'response_refusal_label'!")
-
-        # Show sample to verify
-        sample = wildguardmix['test'][0]
-        print(f"\n📋 Sample fields:")
+        with sample_file.open() as f:
+            first = next(islice(f, 0, 1))
+            sample = json.loads(first)
+        print("\nSample fields from test split:")
         for key in ['prompt', 'response', 'prompt_harm_label', 'response_harm_label', 'response_refusal_label', 'subcategory']:
             if key in sample:
                 value = sample[key]
-                if isinstance(value, str) and len(value) > 100:
-                    value = value[:100] + "..."
+                if isinstance(value, str) and len(value) > 80:
+                    value = value[:80] + "..."
                 print(f"  - {key}: {value}")
-
-    print("\n" + "=" * 60)
-    print("DOWNLOAD COMPLETE!")
-    print("=" * 60)
     print("\nYou can now run:")
     print("  python3 run_experiment.py --benchmark wildguardmix --model Qwen/Qwen3-0.6B")
-
-except Exception as e:
-    print(f"\n❌ Error downloading WildGuardMix: {e}")
-    import traceback
-    traceback.print_exc()
+else:
+    print("❌ No WildGuardMix splits were downloaded. Check HF_TOKEN access.")
