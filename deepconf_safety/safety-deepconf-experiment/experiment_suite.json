@@ -1,0 +1,187 @@
+{
+  "experiments": {
+    "baseline_toxicchat_1000": {
+      "description": "Baseline: Qwen3-0.6B on ToxicChat 1000 instances",
+      "priority": 1,
+      "phase": "baseline",
+      "conditions": [],
+      "command": "python3 run_experiment.py --model Qwen/Qwen3-0.6B --benchmark toxicchat --num-instances 1000 --min-traces 3 --max-traces 10 --output results/baseline_toxicchat_1000",
+      "expected_duration_minutes": 45,
+      "required_for": ["all"]
+    },
+
+    "wildguardmix_validation": {
+      "description": "WildGuardMix validation with gold-standard refusal labels",
+      "priority": 2,
+      "phase": "validation",
+      "conditions": [
+        {"metric": "hypothesis_supported", "value": true}
+      ],
+      "command": "python3 run_experiment.py --model Qwen/Qwen3-0.6B --benchmark wildguardmix --min-traces 3 --max-traces 10 --output results/wildguardmix_qwen06b",
+      "expected_duration_minutes": 90,
+      "required_for": ["publication"]
+    },
+
+    "percentile_70": {
+      "description": "Percentile sweep: 70th percentile (stricter threshold)",
+      "priority": 3,
+      "phase": "optimization",
+      "conditions": [
+        {"metric": "run_percentile_sweep", "value": true}
+      ],
+      "command": "python3 run_experiment.py --model Qwen/Qwen3-0.6B --benchmark toxicchat --num-instances 500 --min-traces 3 --max-traces 10 --output results/percentile_70",
+      "config_override": {"confidence_percentile": 70},
+      "expected_duration_minutes": 25,
+      "required_for": ["optimization"]
+    },
+
+    "percentile_80": {
+      "description": "Percentile sweep: 80th percentile",
+      "priority": 3,
+      "phase": "optimization",
+      "conditions": [
+        {"metric": "run_percentile_sweep", "value": true}
+      ],
+      "command": "python3 run_experiment.py --model Qwen/Qwen3-0.6B --benchmark toxicchat --num-instances 500 --min-traces 3 --max-traces 10 --output results/percentile_80",
+      "config_override": {"confidence_percentile": 80},
+      "expected_duration_minutes": 25,
+      "required_for": ["optimization"]
+    },
+
+    "percentile_90": {
+      "description": "Percentile sweep: 90th percentile (DeepConf default)",
+      "priority": 3,
+      "phase": "optimization",
+      "conditions": [
+        {"metric": "run_percentile_sweep", "value": true}
+      ],
+      "command": "python3 run_experiment.py --model Qwen/Qwen3-0.6B --benchmark toxicchat --num-instances 500 --min-traces 3 --max-traces 10 --output results/percentile_90",
+      "config_override": {"confidence_percentile": 90},
+      "expected_duration_minutes": 25,
+      "required_for": ["optimization"]
+    },
+
+    "percentile_95": {
+      "description": "Percentile sweep: 95th percentile (looser threshold)",
+      "priority": 3,
+      "phase": "optimization",
+      "conditions": [
+        {"metric": "run_percentile_sweep", "value": true}
+      ],
+      "command": "python3 run_experiment.py --model Qwen/Qwen3-0.6B --benchmark toxicchat --num-instances 500 --min-traces 3 --max-traces 10 --output results/percentile_95",
+      "config_override": {"confidence_percentile": 95},
+      "expected_duration_minutes": 25,
+      "required_for": ["optimization"]
+    },
+
+    "qwen3_1.7b_toxicchat": {
+      "description": "Model comparison: Qwen3-1.7B on ToxicChat",
+      "priority": 4,
+      "phase": "generalization",
+      "conditions": [
+        {"metric": "run_model_comparison", "value": true}
+      ],
+      "command": "python3 run_experiment.py --model Qwen/Qwen3-1.7B --benchmark toxicchat --num-instances 500 --min-traces 3 --max-traces 10 --output results/qwen3_1.7b_toxicchat",
+      "expected_duration_minutes": 35,
+      "required_for": ["generalization"]
+    },
+
+    "qwen3_4b_toxicchat": {
+      "description": "Model comparison: Qwen3-4B on ToxicChat",
+      "priority": 4,
+      "phase": "generalization",
+      "conditions": [
+        {"metric": "run_model_comparison", "value": true},
+        {"metric": "is_efficient", "value": true}
+      ],
+      "command": "python3 run_experiment.py --model Qwen/Qwen3-4B --benchmark toxicchat --num-instances 500 --min-traces 3 --max-traces 10 --output results/qwen3_4b_toxicchat",
+      "expected_duration_minutes": 50,
+      "required_for": ["generalization"]
+    },
+
+    "qwen3_8b_toxicchat": {
+      "description": "Model comparison: Qwen3-8B on ToxicChat (if budget allows)",
+      "priority": 5,
+      "phase": "generalization",
+      "conditions": [
+        {"metric": "run_model_comparison", "value": true},
+        {"metric": "is_efficient", "value": true}
+      ],
+      "command": "python3 run_experiment.py --model Qwen/Qwen3-8B --benchmark toxicchat --num-instances 500 --min-traces 3 --max-traces 10 --output results/qwen3_8b_toxicchat",
+      "expected_duration_minutes": 70,
+      "required_for": ["generalization"],
+      "budget_sensitive": true
+    },
+
+    "max_traces_15_optimization": {
+      "description": "Optimization: Increase max_traces to 15 for better accuracy",
+      "priority": 3,
+      "phase": "optimization",
+      "conditions": [
+        {"metric": "needs_optimization", "value": true}
+      ],
+      "command": "python3 run_experiment.py --model Qwen/Qwen3-0.6B --benchmark toxicchat --num-instances 500 --min-traces 3 --max-traces 15 --output results/max_traces_15",
+      "expected_duration_minutes": 30,
+      "required_for": ["optimization"]
+    },
+
+    "toxicchat_full_5083": {
+      "description": "Full ToxicChat dataset (all 5083 test instances)",
+      "priority": 5,
+      "phase": "publication",
+      "conditions": [
+        {"metric": "hypothesis_supported", "value": true},
+        {"metric": "is_efficient", "value": true}
+      ],
+      "command": "python3 run_experiment.py --model Qwen/Qwen3-0.6B --benchmark toxicchat --min-traces 3 --max-traces 10 --output results/toxicchat_full",
+      "expected_duration_minutes": 180,
+      "required_for": ["publication"],
+      "budget_sensitive": true
+    },
+
+    "calibration_investigation": {
+      "description": "Investigate calibration if hypothesis not supported",
+      "priority": 2,
+      "phase": "investigation",
+      "conditions": [
+        {"metric": "investigate_calibration", "value": true}
+      ],
+      "command": "python3 run_experiment.py --model Qwen/Qwen3-0.6B --benchmark wildguardmix --min-traces 3 --max-traces 10 --output results/calibration_check",
+      "expected_duration_minutes": 90,
+      "required_for": ["investigation"]
+    }
+  },
+
+  "experiment_order": {
+    "baseline": ["baseline_toxicchat_1000"],
+    "validation": ["wildguardmix_validation"],
+    "optimization": [
+      "percentile_70",
+      "percentile_80",
+      "percentile_90",
+      "percentile_95",
+      "max_traces_15_optimization"
+    ],
+    "generalization": [
+      "qwen3_1.7b_toxicchat",
+      "qwen3_4b_toxicchat",
+      "qwen3_8b_toxicchat"
+    ],
+    "publication": ["toxicchat_full_5083"],
+    "investigation": ["calibration_investigation"]
+  },
+
+  "budget_constraints": {
+    "total_budget_usd": 400,
+    "hourly_rate_usd": 1.29,
+    "max_runtime_hours": 20,
+    "reserved_for_download_hours": 0.5
+  },
+
+  "notes": {
+    "percentile_sweep": "Tests adaptive threshold sensitivity. Lower percentile = stricter threshold = earlier stopping.",
+    "model_comparison": "Tests if hypothesis holds across model scales. Important for deployment decisions.",
+    "wildguardmix": "Critical for publication - has gold-standard refusal labels for validation.",
+    "config_override": "Currently not implemented in run_experiment.py - would need code modification to support dynamic percentile."
+  }
+}
